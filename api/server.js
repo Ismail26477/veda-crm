@@ -10,6 +10,9 @@ import callLogsRoutes from "../server/routes/callLogs.js"
 import dashboardRoutes from "../server/routes/dashboard.js"
 import settingsRoutes from "../server/routes/settings.js"
 import reportsRoutes from "../server/routes/reports.js"
+import followupRoutes from "../server/routes/followups.js"
+import brokerRoutes from "../server/routes/brokers.js"
+import integrationsRoutes from "../server/routes/integrations.js"
 import Caller from "../server/models/Caller.js"
 import meetingRoutes from "../server/routes/meetings.js"
 
@@ -163,6 +166,9 @@ app.use("/api/call-logs", callLogsRoutes)
 app.use("/api/dashboard", dashboardRoutes)
 app.use("/api/reports", reportsRoutes)
 app.use("/api/settings", settingsRoutes)
+app.use("/api/followups", followupRoutes)
+app.use("/api/brokers", brokerRoutes)
+app.use("/api/integrations", integrationsRoutes)
 app.use("/api/meetings", meetingRoutes)
 
 // 404 handler
