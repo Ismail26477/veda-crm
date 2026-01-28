@@ -1,89 +1,189 @@
-// Import necessary modules
 import express from "express"
-import mongoose from "mongoose"
 import cors from "cors"
-import followupsRouter from "./routes/followups.js"
-import brokersRouter from "./routes/brokers.js"
-import leadsRouter from "./routes/leads.js"
-import callersRouter from "./routes/callers.js"
-import activitiesRouter from "./routes/activities.js"
-import callLogsRouter from "./routes/callLogs.js"
-import meetingsRouter from "./routes/meetings.js"
-import dashboardRouter from "./routes/dashboard.js"
-import reportsRouter from "./routes/reports.js"
-import settingsRouter from "./routes/settings.js"
-import authRouter from "./routes/auth.js"
-import integrationsRouter from "./routes/integrations.js"
+import dotenv from "dotenv"
+import mongoose from "mongoose"
+import authRoutes from "../server/routes/auth.js"
+import callerRoutes from "../server/routes/callers.js"
+import activityRoutes from "../server/routes/activities.js"
+import leadsRoutes from "../server/routes/leads.js"
+import callLogsRoutes from "../server/routes/callLogs.js"
+import dashboardRoutes from "../server/routes/dashboard.js"
+import settingsRoutes from "../server/routes/settings.js"
+import reportsRoutes from "../server/routes/reports.js"
+import followupRoutes from "../server/routes/followups.js"
+import brokerRoutes from "../server/routes/brokers.js"
+import integrationsRoutes from "../server/routes/integrations.js"
+import Caller from "../server/models/Caller.js"
+import meetingRoutes from "../server/routes/meetings.js"
 
-// Create an instance of express
+dotenv.config()
+
 const app = express()
 
 // Middleware
+app.use(cors())
 app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
-
-// CORS configuration - allow requests from frontend
-app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}))
 
 // MongoDB Connection
+let mongoConnecting = false
+let cachedDb = null
+
 const connectDB = async () => {
+  // If already connected, return cached connection
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    return cachedDb
+  }
+
+  // Prevent multiple simultaneous connection attempts
+  if (mongoConnecting) {
+    console.log("[v0] MongoDB connection already in progress, waiting...")
+    // Wait for connection to complete
+    for (let i = 0; i < 30; i++) {
+      if (mongoose.connection.readyState === 1) {
+        return cachedDb
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+
+  // Check if MONGODB_URI exists
+  if (!process.env.MONGODB_URI) {
+    throw new Error(
+      "MONGODB_URI not configured. " +
+        "1. Go to https://mongodb.com/cloud/atlas (create free account) " +
+        "2. Create a database cluster " +
+        "3. Get connection string " +
+        "4. Add to Vercel: Settings > Environment Variables > MONGODB_URI",
+    )
+  }
+
   try {
-    const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/grabdeal"
-    console.log("[v0] Attempting to connect to MongoDB:", mongoURI.replace(/\/\/.*:.*@/, "//***:***@"))
-    
-    await mongoose.connect(mongoURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    })
-    
+    mongoConnecting = true
+    const opts = {
+      bufferCommands: false,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    }
+
+    cachedDb = await mongoose.connect(process.env.MONGODB_URI, opts)
+    mongoConnecting = false
     console.log("[v0] MongoDB connected successfully")
+
+    await createDefaultAdmin()
+
+    return cachedDb
   } catch (error) {
-    console.error("[v0] MongoDB connection error:", error.message)
-    console.log("[v0] Continuing without database connection - mock mode enabled")
+    mongoConnecting = false
+    console.error("[v0] MongoDB connection failed:", error.message)
+    throw error
   }
 }
 
-// Connect to database
-connectDB()
+const createDefaultAdmin = async () => {
+  try {
+    const adminExists = await Caller.findOne({ username: "admin" })
 
-// Use routers
-app.use("/api/leads", leadsRouter)
-app.use("/api/followups", followupsRouter)
-app.use("/api/brokers", brokersRouter)
-app.use("/api/callers", callersRouter)
-app.use("/api/activities", activitiesRouter)
-app.use("/api/call-logs", callLogsRouter)
-app.use("/api/meetings", meetingsRouter)
-app.use("/api/dashboard", dashboardRouter)
-app.use("/api/reports", reportsRouter)
-app.use("/api/settings", settingsRouter)
-app.use("/api/auth", authRouter)
-app.use("/api/integrations", integrationsRouter)
+    if (!adminExists) {
+      console.log("[v0] Creating default admin user...")
+      const admin = new Caller({
+        username: "admin",
+        name: "Administrator",
+        email: "admin@gmail.com",
+        password: "admin123", // Plain text stored as-is (NOT hashed in current schema)
+        role: "admin",
+        status: "active",
+        phone: "+1234567890",
+      })
+
+      await admin.save()
+      console.log("[v0] Default admin user created successfully")
+    } else {
+      console.log("[v0] Admin user already exists")
+    }
+  } catch (error) {
+    console.error("[v0] Error creating default admin:", error.message)
+    // Don't fail the entire app if admin creation fails
+  }
+}
+
+app.use(async (req, res, next) => {
+  // Check if this is a health check or setup endpoint
+  if (req.path === "/api/health" || req.path === "/api/setup") {
+    return next()
+  }
+
+  try {
+    await connectDB()
+    next()
+  } catch (error) {
+    console.error("[v0] Database connection error:", error.message)
+    // Don't crash - return helpful error to client
+    return res.status(503).json({
+      success: false,
+      message: "Database not configured",
+      error: error.message,
+      setup: "Visit /api/setup for configuration instructions",
+    })
+  }
+})
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
-  res.json({ status: "OK", mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected" })
+  const dbConnected = mongoose.connection.readyState === 1
+  res.json({
+    status: "ok",
+    database: dbConnected ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  })
 })
+
+// Setup/diagnostics endpoint
+app.get("/api/setup", (req, res) => {
+  const hasMongoUri = !!process.env.MONGODB_URI
+  res.json({
+    environment: process.env.NODE_ENV || "production",
+    mongoUri: hasMongoUri ? "✓ Configured" : "✗ Missing",
+    databaseConnected: mongoose.connection.readyState === 1,
+    instructions: hasMongoUri
+      ? "MongoDB URI is set. Login should work now. Try: admin@gmail.com / admin123"
+      : [
+          "1. Create MongoDB Atlas account: https://mongodb.com/cloud/atlas",
+          "2. Create free database cluster",
+          "3. Get connection string (include password)",
+          "4. Go to Vercel Dashboard > Settings > Environment Variables",
+          "5. Add: MONGODB_URI = <your_connection_string>",
+          "6. Redeploy project",
+        ],
+  })
+})
+
+// Routes
+app.use("/api/auth", authRoutes)
+app.use("/api/callers", callerRoutes)
+app.use("/api/activities", activityRoutes)
+app.use("/api/leads", leadsRoutes)
+app.use("/api/call-logs", callLogsRoutes)
+app.use("/api/dashboard", dashboardRoutes)
+app.use("/api/reports", reportsRoutes)
+app.use("/api/settings", settingsRoutes)
+app.use("/api/followups", followupRoutes)
+app.use("/api/brokers", brokerRoutes)
+app.use("/api/integrations", integrationsRoutes)
+app.use("/api/meetings", meetingRoutes)
 
 // 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: "Endpoint not found", path: req.path, method: req.method })
+app.use("/api/*", (req, res) => {
+  res.status(404).json({ message: `API route not found: ${req.originalUrl}` })
 })
 
-// Error handling middleware
+// Global error handler
 app.use((err, req, res, next) => {
   console.error("[v0] Unhandled error:", err)
-  res.status(500).json({ error: "Internal server error", message: err.message })
+  res.status(500).json({
+    message: "Internal server error",
+    error: process.env.NODE_ENV === "development" ? err.message : "Server error",
+  })
 })
 
-// Start the server
-const PORT = process.env.PORT || 5000
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[v0] Server is running on port ${PORT}`)
-  console.log(`[v0] Frontend should connect to http://localhost:${PORT}/api`)
-})
+// Export for Vercel serverless
+export default app
