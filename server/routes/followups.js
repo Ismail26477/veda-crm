@@ -5,6 +5,35 @@ import Activity from "../models/Activity.js"
 
 const router = express.Router()
 
+// Get pending follow-ups (for dashboard) - MUST come before generic GET /
+router.get("/pending/dashboard", async (req, res) => {
+  try {
+    const now = new Date()
+    const pendingFollowUps = await FollowUp.find({
+      status: "pending",
+      scheduledFor: { $lte: now },
+    })
+      .populate("leadId", "name phone email")
+      .sort({ scheduledFor: 1 })
+
+    const formatted = pendingFollowUps.map((fu) => ({
+      id: fu._id.toString(),
+      leadId: fu.leadId._id.toString(),
+      leadName: fu.leadId.name,
+      leadPhone: fu.leadId.phone,
+      scheduledFor: fu.scheduledFor,
+      reason: fu.reason,
+      type: fu.type,
+      notes: fu.notes,
+    }))
+
+    res.json(formatted)
+  } catch (error) {
+    console.error("[v0] Error fetching pending follow-ups:", error)
+    res.status(500).json({ message: "Error fetching pending follow-ups", error: error.message })
+  }
+})
+
 // Get all follow-ups (paginated and with lead data)
 router.get("/", async (req, res) => {
   try {
@@ -87,35 +116,6 @@ router.get("/lead/:leadId", async (req, res) => {
   } catch (error) {
     console.error("[v0] Error fetching follow-ups:", error)
     res.status(500).json({ message: "Error fetching follow-ups", error: error.message })
-  }
-})
-
-// Get pending follow-ups (for dashboard)
-router.get("/pending/dashboard", async (req, res) => {
-  try {
-    const now = new Date()
-    const pendingFollowUps = await FollowUp.find({
-      status: "pending",
-      scheduledFor: { $lte: now },
-    })
-      .populate("leadId", "name phone email")
-      .sort({ scheduledFor: 1 })
-
-    const formatted = pendingFollowUps.map((fu) => ({
-      id: fu._id.toString(),
-      leadId: fu.leadId._id.toString(),
-      leadName: fu.leadId.name,
-      leadPhone: fu.leadId.phone,
-      scheduledFor: fu.scheduledFor,
-      reason: fu.reason,
-      type: fu.type,
-      notes: fu.notes,
-    }))
-
-    res.json(formatted)
-  } catch (error) {
-    console.error("[v0] Error fetching pending follow-ups:", error)
-    res.status(500).json({ message: "Error fetching pending follow-ups", error: error.message })
   }
 })
 
