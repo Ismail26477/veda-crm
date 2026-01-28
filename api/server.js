@@ -13,10 +13,9 @@ import reportsRoutes from "../server/routes/reports.js"
 import followupRoutes from "../server/routes/followups.js"
 import brokerRoutes from "../server/routes/brokers.js"
 import integrationsRoutes from "../server/routes/integrations.js"
-import Caller from "../server/models/Caller.js"
 import meetingRoutes from "../server/routes/meetings.js"
 
-dotenv.config()
+dotenv.config({ path: ".env.local" })
 
 const app = express()
 
